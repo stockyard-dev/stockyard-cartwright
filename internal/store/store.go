@@ -1,13 +1,23 @@
 package store
-import("database/sql";"fmt";"os";"path/filepath";"time";_ "modernc.org/sqlite")
-type DB struct{*sql.DB}
-type Dashboard struct{ID int64 `json:"id"`;Name string `json:"name"`;Description string `json:"description"`;Public bool `json:"public"`;CreatedAt time.Time `json:"created_at"`}
-type Chart struct{ID int64 `json:"id"`;DashboardID int64 `json:"dashboard_id"`;Title string `json:"title"`;Query string `json:"query"`;ChartType string `json:"chart_type"`;Config string `json:"config"`;CreatedAt time.Time `json:"created_at"`}
-func Open(d string)(*DB,error){os.MkdirAll(d,0755);dsn:=filepath.Join(d,"cartwright.db")+"?_journal_mode=WAL&_busy_timeout=5000";db,err:=sql.Open("sqlite",dsn);if err!=nil{return nil,fmt.Errorf("open: %w",err)};db.SetMaxOpenConns(1);migrate(db);return &DB{db},nil}
-func migrate(db *sql.DB){db.Exec(`CREATE TABLE IF NOT EXISTS dashboards(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,description TEXT DEFAULT '',public INTEGER DEFAULT 0,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS charts(id INTEGER PRIMARY KEY AUTOINCREMENT,dashboard_id INTEGER NOT NULL,title TEXT NOT NULL,query TEXT DEFAULT '',chart_type TEXT DEFAULT 'bar',config TEXT DEFAULT '{}',created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)}
-func(db *DB)CreateDashboard(d *Dashboard)error{pub:=0;if d.Public{pub=1};res,err:=db.Exec(`INSERT INTO dashboards(name,description,public)VALUES(?,?,?)`,d.Name,d.Description,pub);if err!=nil{return err};d.ID,_=res.LastInsertId();return nil}
-func(db *DB)ListDashboards()([]Dashboard,error){rows,_:=db.Query(`SELECT id,name,description,public,created_at FROM dashboards ORDER BY name`);defer rows.Close();var out[]Dashboard;for rows.Next(){var d Dashboard;var pub int;rows.Scan(&d.ID,&d.Name,&d.Description,&pub,&d.CreatedAt);d.Public=pub==1;out=append(out,d)};return out,nil}
-func(db *DB)AddChart(c *Chart)error{res,err:=db.Exec(`INSERT INTO charts(dashboard_id,title,query,chart_type,config)VALUES(?,?,?,?,?)`,c.DashboardID,c.Title,c.Query,c.ChartType,c.Config);if err!=nil{return err};c.ID,_=res.LastInsertId();return nil}
-func(db *DB)ListCharts(dashID int64)([]Chart,error){rows,_:=db.Query(`SELECT id,dashboard_id,title,query,chart_type,config,created_at FROM charts WHERE dashboard_id=? ORDER BY created_at`,dashID);defer rows.Close();var out[]Chart;for rows.Next(){var c Chart;rows.Scan(&c.ID,&c.DashboardID,&c.Title,&c.Query,&c.ChartType,&c.Config,&c.CreatedAt);out=append(out,c)};return out,nil}
-func(db *DB)DeleteDashboard(id int64){db.Exec(`DELETE FROM charts WHERE dashboard_id=?`,id);db.Exec(`DELETE FROM dashboards WHERE id=?`,id)}
-func(db *DB)Stats()(map[string]interface{},error){var dashes,charts int;db.QueryRow(`SELECT COUNT(*) FROM dashboards`).Scan(&dashes);db.QueryRow(`SELECT COUNT(*) FROM charts`).Scan(&charts);return map[string]interface{}{"dashboards":dashes,"charts":charts},nil}
+import ("database/sql";"fmt";"os";"path/filepath";"time";_ "modernc.org/sqlite")
+type DB struct{db *sql.DB}
+type Item struct{
+	ID string `json:"id"`
+	Name string `json:"name"`
+	Description string `json:"description"`
+	Status string `json:"status"`
+	Category string `json:"category"`
+	Tags string `json:"tags"`
+	CreatedAt string `json:"created_at"`
+}
+func Open(d string)(*DB,error){if err:=os.MkdirAll(d,0755);err!=nil{return nil,err};db,err:=sql.Open("sqlite",filepath.Join(d,"cartwright.db")+"?_journal_mode=WAL&_busy_timeout=5000");if err!=nil{return nil,err}
+db.Exec(`CREATE TABLE IF NOT EXISTS items(id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT DEFAULT '',status TEXT DEFAULT 'active',category TEXT DEFAULT '',tags TEXT DEFAULT '',created_at TEXT DEFAULT(datetime('now')))`)
+return &DB{db:db},nil}
+func(d *DB)Close()error{return d.db.Close()}
+func genID()string{return fmt.Sprintf("%d",time.Now().UnixNano())}
+func now()string{return time.Now().UTC().Format(time.RFC3339)}
+func(d *DB)Create(e *Item)error{e.ID=genID();e.CreatedAt=now();_,err:=d.db.Exec(`INSERT INTO items(id,name,description,status,category,tags,created_at)VALUES(?,?,?,?,?,?,?)`,e.ID,e.Name,e.Description,e.Status,e.Category,e.Tags,e.CreatedAt);return err}
+func(d *DB)Get(id string)*Item{var e Item;if d.db.QueryRow(`SELECT id,name,description,status,category,tags,created_at FROM items WHERE id=?`,id).Scan(&e.ID,&e.Name,&e.Description,&e.Status,&e.Category,&e.Tags,&e.CreatedAt)!=nil{return nil};return &e}
+func(d *DB)List()[]Item{rows,_:=d.db.Query(`SELECT id,name,description,status,category,tags,created_at FROM items ORDER BY created_at DESC`);if rows==nil{return nil};defer rows.Close();var o []Item;for rows.Next(){var e Item;rows.Scan(&e.ID,&e.Name,&e.Description,&e.Status,&e.Category,&e.Tags,&e.CreatedAt);o=append(o,e)};return o}
+func(d *DB)Delete(id string)error{_,err:=d.db.Exec(`DELETE FROM items WHERE id=?`,id);return err}
+func(d *DB)Count()int{var n int;d.db.QueryRow(`SELECT COUNT(*) FROM items`).Scan(&n);return n}
