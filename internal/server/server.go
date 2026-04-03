@@ -1,7 +1,7 @@
 package server
 import ("encoding/json";"log";"net/http";"github.com/stockyard-dev/stockyard-cartwright/internal/store")
-type Server struct{db *store.DB;mux *http.ServeMux}
-func New(db *store.DB)*Server{s:=&Server{db:db,mux:http.NewServeMux()}
+type Server struct{db *store.DB;mux *http.ServeMux;limits Limits}
+func New(db *store.DB,limits Limits)*Server{s:=&Server{db:db,mux:http.NewServeMux(),limits:limits}
 s.mux.HandleFunc("GET /api/reports",s.list)
 s.mux.HandleFunc("POST /api/reports",s.create)
 s.mux.HandleFunc("GET /api/reports/{id}",s.get)
@@ -20,7 +20,7 @@ func(s *Server)list(w http.ResponseWriter,r *http.Request){
     if q!=""||len(filters)>0{wj(w,200,map[string]any{"reports":oe(s.db.Search(q,filters))});return}
     wj(w,200,map[string]any{"reports":oe(s.db.List())})
 }
-func(s *Server)create(w http.ResponseWriter,r *http.Request){var e store.Report;json.NewDecoder(r.Body).Decode(&e);if e.Title==""{we(w,400,"title required");return};s.db.Create(&e);wj(w,201,s.db.Get(e.ID))}
+func(s *Server)create(w http.ResponseWriter,r *http.Request){if s.limits.MaxItems>0{items:=s.db.List();if len(items)>=s.limits.MaxItems{we(w,402,"Free tier limit reached. Upgrade at https://stockyard.dev/cartwright/");return}};var e store.Report;json.NewDecoder(r.Body).Decode(&e);if e.Title==""{we(w,400,"title required");return};s.db.Create(&e);wj(w,201,s.db.Get(e.ID))}
 func(s *Server)get(w http.ResponseWriter,r *http.Request){e:=s.db.Get(r.PathValue("id"));if e==nil{we(w,404,"not found");return};wj(w,200,e)}
 func(s *Server)update(w http.ResponseWriter,r *http.Request){
     existing:=s.db.Get(r.PathValue("id"));if existing==nil{we(w,404,"not found");return}
